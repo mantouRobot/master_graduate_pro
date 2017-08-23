@@ -26,7 +26,8 @@ int main(int argc, char** argv) {
   boost::thread *thread = new boost::thread(threadCb);
   ros::Rate r(1000);
   while(ros::ok()) {
-    ROS_INFO("%d, %d", mouse_x, mouse_y);
+//    ROS_INFO("%d\t%d", mouse_x, mouse_y);
+    std::cout << mouse_x << "\t" << mouse_y << std::endl;
     r.sleep();
   }
   ros::spin();
