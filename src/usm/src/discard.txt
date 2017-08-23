@@ -1,0 +1,309 @@
+/* author: mantou */
+
+#include <stdio.h>
+
+
+#include <opencv2/opencv.hpp>
+#include <std_msgs/Empty.h>
+
+#include <usm/main_class.h>
+
+
+using namespace pangolin;
+
+namespace main_class {
+
+MainClass::MainClass(ros::NodeHandle nh, ros::NodeHandle pnh) :
+  nh_(nh),
+  pnh_(pnh),
+  ball_theta_(0),
+  spring_press_radius_(30.0 / 180.0 * M_PI)
+{
+  pangolin_thread_ = new boost::thread(boost::bind(&MainClass::startPangolin, this));
+  haptic_thread_ = new boost::thread(boost::bind(&MainClass::hapticRender, this));
+  debug_pub_ = nh_.advertise<std_msgs::Empty>("/debug", 1);
+}
+
+MainClass::~MainClass() {
+  if(pangolin_thread_ != nullptr) {
+    pangolin_thread_->interrupt();
+    pangolin_thread_->join();
+    pangolin_thread_ = nullptr;
+  }
+}
+
+void MainClass::keyHook(const std::string& input)
+{
+  if(input == "a")
+    ball_theta_ -= 0.05;
+  else if(input == "d")
+    ball_theta_ += 0.05;
+//  else if(input == "p")
+//    pitch_ += 10;
+//  else if(input == "y")
+//    yaw_ += 10;
+//  else if(input == "f")
+//    roll_ -= 10;
+//  else
+//    std::cerr << "key input error!" << std::endl;
+}
+
+// 画细矩形墙
+void MainClass::drawWall() {
+
+  glEnable(GL_TEXTURE_2D);
+
+  texture_ = loadTexture();
+  glBindTexture(GL_TEXTURE_2D, texture_);
+
+  glColor3f(1.0, 1.0, 1.0);
+  glBegin(GL_POLYGON);
+  glTexCoord2f(1.0, 0.0); glVertex2f(0, 0);
+  glTexCoord2f(1.0, 1.0); glVertex2f(5, -5);
+  glTexCoord2f(0.0, 1.0); glVertex2f(5.707, -4.293);
+  glTexCoord2f(0.0, 0.0); glVertex2f(0.707, 0.707);
+  glEnd();
+
+  glBegin(GL_POLYGON);
+  glTexCoord2f(1.0, 0.0); glVertex2f(0, 0);
+  glTexCoord2f(1.0, 1.0); glVertex2f(-5, -5);
+  glTexCoord2f(0.0, 1.0); glVertex2f(-5.707, -4.293);
+  glTexCoord2f(0.0, 0.0); glVertex2f(-0.707, 0.707);
+  glEnd();
+
+  glDisable(GL_TEXTURE_2D);
+
+}
+
+// 画小球
+void MainClass::drawBall(double ball_theta) {
+  double cx, cy, r, num_segments;
+  cx = 5 * sin(ball_theta);
+  cy = -5 * cos(ball_theta);
+  r = 0.3;
+  num_segments = 30;
+  glColor3f(0, 1.0, 0.0);
+  glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
+  glBegin(GL_TRIANGLE_FAN);
+  for (int i = 0; i <= num_segments; i++)
+    glVertex2f(cx + r * cos((2 * M_PI * i) / num_segments),
+               cy + r * sin((2 * M_PI * i) / num_segments));
+  glEnd();
+
+}
+
+// 画圆段，半径为5
+void MainClass::drawCircle() {
+  glColor3f(1.0, 1.0, 1.0);
+  GLUquadricObj *qobj;
+  GLuint startList = glGenLists(1);
+  qobj = gluNewQuadric();
+  gluQuadricDrawStyle(qobj, GLU_SILHOUETTE); /* 只画边缘  */
+  gluQuadricNormals(qobj, GLU_NONE);/*不算NORMAL(顶点的方向）*/
+  glNewList(startList, GL_COMPILE);/*只编译DISPLAY LIST不绘制*/
+  gluPartialDisk(qobj, 0, 5.0, 50, 50, 135.0, 90.0);/* 第一个参数是A quadric object，然后内圆半径为0.0，外圆半径为1.0，z轴向分割片数，最后两个参数是圆弧的起始角和圆弧角度  */
+  glEndList();
+  glCallList(startList);
+}
+
+// 画弹簧，使用极坐标
+void MainClass::drawSpring(double spring_press_radius) {
+  const int kNumPoints = 15;
+  const double kRChange = 0.5;
+  const double R = 5;
+
+  double r, theta, x, y;
+  glColor3f(1.0, 0.0, 0.0);
+  glLineWidth(2);
+  glBegin(GL_LINE_STRIP);
+  glVertex2f(-3.535, -3.535);
+  for(int i = 1; i <= kNumPoints; i++) {
+    if(i % 2 == 1)
+      r = R - kRChange;
+    else
+      r = R + kRChange;
+    theta = spring_press_radius / (2.0 * kNumPoints) * (2.0 * i - 1);
+    x = r * cos(theta + 225.0 / 180.0 * M_PI);
+    y = r * sin(theta + 225.0 / 180.0 * M_PI);
+    glVertex2f(x, y);
+  }
+  r = R;
+  theta += spring_press_radius / (2.0 * kNumPoints);
+  x = r * cos(theta + 225.0 / 180.0 * M_PI);
+  y = r * sin(theta + 225.0 / 180.0 * M_PI);
+  glVertex2f(x, y);
+  glEnd();
+}
+
+GLuint MainClass::loadTexture() {
+  //OpenCV读取图像
+  cv::Mat img = cv::imread("/home/mantou/usm_ws/src/usm/data/1.png", CV_LOAD_IMAGE_UNCHANGED);
+  if(img.empty())
+    ROS_ERROR("NO img.");
+
+  //OpenGL纹理用整型数表示
+  GLuint texture_ID;
+
+  //将texture_ID设置为2D纹理信息
+  glGenTextures(1, &texture_ID);
+  glBindTexture(GL_TEXTURE_2D, texture_ID);
+  //纹理放大缩小使用线性插值
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  //纹理水平竖直方向外扩使用重复贴图
+  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  //纹理水平竖直方向外扩使用边缘像素贴图(与重复贴图二选一)
+//  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+//  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+
+  // cv的图像存储含有对齐，小心
+  glPixelStorei(GL_UNPACK_ALIGNMENT, (img.step & 3) ? 1 : 4);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, img.step/img.elemSize());
+  cv::flip(img, img, 0);
+  //将图像内存用作纹理信息
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, img.cols, img.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, img.ptr());
+  return texture_ID;
+
+//  GLuint texture_ID;
+//  texture_ID = SOIL_load_OGL_texture("/home/mantou/usm_ws/src/usm/data/1.png",
+//                                     SOIL_LOAD_AUTO,
+//                                     SOIL_CREATE_NEW_ID,
+//                                     SOIL_FLAG_MIPMAPS | SOIL_FLAG_INVERT_Y | SOIL_FLAG_NTSC_SAFE_RGB | SOIL_FLAG_COMPRESS_TO_DXT);
+//  if(texture_ID == 0)
+//    ROS_ERROR("Load img error.");
+//  //将texture_ID设置为2D纹理信息
+//  glGenTextures(1, &texture_ID);
+//  glBindTexture(GL_TEXTURE_2D, texture_ID);
+//  //纹理放大缩小使用线性插值
+//  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+//  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+//  //纹理水平竖直方向外扩使用重复贴图
+//  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+//  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+//  //纹理水平竖直方向外扩使用边缘像素贴图(与重复贴图二选一)
+////  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+////  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+////  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, img);
+////  glBindTexture(GL_TEXTURE_2D, texture_ID);
+//  return texture_ID;
+}
+
+void MainClass::startPangolin() {
+
+  pangolin::CreateWindowAndBind("Main", 640, 480);
+  glEnable(GL_DEPTH_TEST);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  const int UI_WIDTH = 180;
+
+  OpenGlRenderState s_cam(
+        ProjectionMatrix(640,480,420,420,320,240,0.1,1000),
+        ModelViewLookAt(-0,0,10, 0,0,0, pangolin::AxisY));
+
+  // Add named OpenGL viewport to window and provide 3D Handler
+  pangolin::View& d_cam = pangolin::CreateDisplay()
+      .SetBounds(0.0, 1.0, Attach::Pix(UI_WIDTH), 1.0, -640.0f/480.0f)
+      .SetHandler(new Handler3D(s_cam));
+  // Add named Panel and bind to variables beginning 'ui'
+  // A Panel is just a View with a default layout and input handling
+  View& d_panel = pangolin::CreatePanel("ui")
+      .SetBounds(0.0, 1.0, 0.0, Attach::Pix(UI_WIDTH));
+
+  RegisterKeyPressCallback('a', boost::bind(&MainClass::keyHook, this, "a"));
+  RegisterKeyPressCallback('d', boost::bind(&MainClass::keyHook, this, "d"));
+
+  // 60Hz刷新频率
+  while(!pangolin::ShouldQuit() && ros::ok())
+  {
+    std_msgs::Empty empty;
+    debug_pub_.publish(empty);
+    // Clear entire screen
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+//    static Var<bool> checkbox("ui.2D",false,true);
+//    static Var<bool> button("ui.Reset", false, false);
+
+//    if(checkbox)
+//    {
+//      std::cout << "set to 2d." << std::endl;
+//      is_2d_ = true;
+//    }
+//    if(Pushed(button))
+//    {
+//      std::cout << "push the reset button." << std::endl;
+//      SetRPY(0, 0, 0);
+//    }
+
+    // Activate efficiently by object
+    d_cam.Activate(s_cam);
+
+    // Reader some stuff
+    glPushMatrix();
+    glTranslatef(0, 3, 0);
+    //茶壶的pitch 是我的yaw
+    //茶壶的roll 是我的pitch
+    if(1)
+    {
+      glRotatef(0, 1.0f, 0.0f, 0.0f);
+      glRotatef(0, 0.0f, 1.0f, 0.0f);
+      glRotatef(0, 0.0f, 0.0f, 1.0f);
+    }
+    else
+    {
+      //转换到物体坐标系
+//      glRotatef((float)roll_, 1.0f, 0.0f, 0.0f); // roll
+//      glRotatef((float)yaw_, 0.0f, 1.0f, 0.0f); // pitch
+//      glRotatef((float)-pitch_, 0.0f, 0.0f, 1.0f); // yaw
+    }
+    glColor3f(1.0, 1.0, 1.0);
+
+    drawWall();
+    drawCircle(); // 半径为5
+    drawBall(ball_theta_);
+    drawSpring(spring_press_radius_);
+    glPopMatrix();
+
+    // Swap frames and Process Events
+    pangolin::FinishFrame();
+  }
+}
+
+void MainClass::hapticRender() {
+  ros::Rate r(200);
+  double kGapTheta = 0.06; // 小球边缘相对于中心有角位移0.06弧度
+  while(ros::ok()) {
+    // 压缩弹簧过程
+    if((ball_theta_ - kGapTheta) < -(15.0 / 180.0 * M_PI) && (ball_theta_ - kGapTheta) > -(45.0 / 180.0 * M_PI)) {
+      spring_press_radius_ = 45.0 / 180.0 * M_PI + ball_theta_ - kGapTheta;
+    }
+    // 压缩弹簧到左碰壁
+    else if((ball_theta_ - kGapTheta) <= -(45.0 / 180.0 * M_PI)) {
+      spring_press_radius_ = 0;
+      ball_theta_ = -(45.0 / 180.0 * M_PI - kGapTheta);
+    }
+    // 右碰壁
+    else if((ball_theta_ + kGapTheta) > (45.0 / 180.0 * M_PI)) {
+      spring_press_radius_ = 30.0 / 180.0 * M_PI;
+      ball_theta_ = 45.0 / 180.0 * M_PI - kGapTheta;
+    }
+    // 自由空间
+    else {
+      spring_press_radius_ = 30.0 / 180.0 * M_PI;
+    }
+    r.sleep();
+  }
+}
+
+}
+
+//  handler->getDevice(hapticDevice, 0);
+  hapticDevice.reset(new chai3d::MyDevice(1));
+
+
+
+
+

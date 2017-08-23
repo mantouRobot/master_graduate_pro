@@ -1,0 +1,10 @@
+serial/include
+serial/include
+usm/include
+/usr/include/qt4
+usm/src
+usm/include/usm
+usm/include/daq
+usm/src/test_src
+/home/mantou/chai3d-3.2.0/src
+/home/mantou/chai3d-3.2.0/extras/GLFW/include
