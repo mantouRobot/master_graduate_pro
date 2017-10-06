@@ -151,23 +151,23 @@ include_directories(
 #add_dependencies(test_serial_motor ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 #target_link_libraries(test_serial_motor ${catkin_LIBRARIES})
 
-#add_executable(main src/main.cpp
-                 #   src/main_class.cpp)
-#add_dependencies(main ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-#target_link_libraries(main
-#  ${catkin_LIBRARIES}
-#  ${Pangolin_LIBRARIES}
-#  ${GLUT_LIBRARIES}
-#  ${OpenCV_LIBS}
- # /usr/lib/libSOIL.so)
+# 包含额外的链接库路径
+link_directories("/home/mantou/usm_ws/libs")
+link_directories(${CHAI3D_LIBRARY_DIRS})
+
+add_executable(main src/main.cpp
+                    src/main_class.cpp)
+add_dependencies(main ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(main
+  ${catkin_LIBRARIES}
+  ${Pangolin_LIBRARIES}
+  ${GLUT_LIBRARIES}
+  ${OpenCV_LIBS}
+  libbiodaq.so)
 
 #add_executable(test_gl src/test_gl.cpp)
 #add_dependencies(test_gl ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 #target_link_libraries(test_gl ${catkin_LIBRARIES} ${Pangolin_LIBRARIES} ${GLUT_LIBRARIES} ${OpenCV_LIBS})
-
-# 包含额外的链接库路径
-link_directories("/home/mantou/usm_ws/libs")
-link_directories(${CHAI3D_LIBRARY_DIRS})
 
 add_executable(test_daq src/test_daq.cpp)
 target_link_libraries(test_daq libbiodaq.so)

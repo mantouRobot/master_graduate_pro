@@ -3,11 +3,11 @@
 #include <stdio.h>
 
 #include <opencv2/opencv.hpp>
-#include <SOIL/SOIL.h>
 #include <std_msgs/Empty.h>
 
 #include <usm/main_class.h>
 
+#define CHECK(ret) {if(BioFailed(ret)) ROS_ERROR("DAQ init failed.");}
 
 using namespace pangolin;
 
@@ -17,8 +17,12 @@ MainClass::MainClass(ros::NodeHandle nh, ros::NodeHandle pnh) :
   nh_(nh),
   pnh_(pnh),
   ball_theta_(0),
-  spring_press_radius_(30.0 / 180.0 * M_PI)
+  spring_press_radius_(30.0 / 180.0 * M_PI),
+  serial_("/dev/ttyS0", 115200, serial::Timeout::simpleTimeout(1000)),
+  daq_link_(AdxUdCounterCtrlCreate()),
+  daq_motor_(AdxUdCounterCtrlCreate())
 {
+  initHardware();
   pangolin_thread_ = new boost::thread(boost::bind(&MainClass::startPangolin, this));
   haptic_thread_ = new boost::thread(boost::bind(&MainClass::hapticRender, this));
   debug_pub_ = nh_.advertise<std_msgs::Empty>("/debug", 1);
@@ -30,6 +34,41 @@ MainClass::~MainClass() {
     pangolin_thread_->join();
     pangolin_thread_ = nullptr;
   }
+  daq_link_->Dispose();
+  daq_motor_->Dispose();
+}
+
+void MainClass::initHardware()
+{
+  // 串口打开初始化
+  if(!serial_.isOpen()) {
+    serial_.open();
+    if(!serial_.isOpen())
+      ROS_ERROR("Serial open failed!");
+  }
+  ROS_INFO("Serial init successed.");
+
+  // 采集卡初始化
+  DeviceInformation devInfo(L"PCI-1784,BID#0");
+  ErrorCode ret = Success;
+  ret = daq_link_->setSelectedDevice(devInfo);
+  CHECK(ret);
+  ret = daq_link_->setChannel(0); // 连杆是通道0
+  CHECK(ret);
+  ret = daq_link_->setCountingType(AbPhaseX4); // 4倍频
+  CHECK(ret);
+  ret= daq_link_->setEnabled(true);
+  CHECK(ret);
+
+  ret = daq_motor_->setSelectedDevice(devInfo);
+  CHECK(ret);
+  ret = daq_motor_->setChannel(1); // 电机是通道1
+  CHECK(ret);
+  ret = daq_motor_->setCountingType(AbPhaseX4); // 4倍频
+  CHECK(ret);
+  ret= daq_motor_->setEnabled(true);
+  CHECK(ret);
+  ROS_INFO("DAQ init successed.");
 }
 
 void MainClass::keyHook(const std::string& input)
@@ -175,7 +214,7 @@ void MainClass::initGL() {
   glLightfv( GL_LIGHT1, GL_DIFFUSE, lightDiffuse );
   glLightfv( GL_LIGHT1, GL_POSITION, lightPosition );
   glEnable( GL_LIGHT1 );
-//  glEnable( GL_LIGHTING );
+  //  glEnable( GL_LIGHTING );
 }
 
 void MainClass::startPangolin() {
@@ -263,9 +302,34 @@ void MainClass::startPangolin() {
 }
 
 void MainClass::hapticRender() {
-  ros::Rate r(1000);
+  // 导纳控制100Hz
+  ros::Rate r(100);
+
   double kGapTheta = 0.06; // 小球边缘相对于中心有角位移0.06弧度
+
   while(ros::ok()) {
+    // 获取连杆当前角度
+    ecd_link_ = daq_link_->getValue();
+    // 获取电机当前角度
+    ecd_motor_ = daq_motor_->getValue();
+    // 根据电机当前角度计算差量
+    int32 degree = ecd_link_ + ecd_motor_;
+    if(abs(degree) < 20) degree = 0;
+//    ROS_INFO("ecd_link:%d, ecd_motor:%d, degree:%d", ecd_link_, ecd_motor_, degree);
+    // 下发差量
+    if(degree > 0) {
+      motor_cmd_ = "A2,P41500," + std::to_string(abs(degree)) + "#";
+//      ROS_INFO_STREAM(motor_cmd_);
+      serial_.write(motor_cmd_);
+    } else {
+      motor_cmd_ = "A2,N41500," + std::to_string(abs(degree)) + "#";
+//      ROS_INFO_STREAM(motor_cmd_);
+      serial_.write(motor_cmd_);
+    }
+
+    // 更新图形
+    ball_theta_ = -ecd_link_ / 16384.0 * 2 * M_PI;
+//    ROS_WARN("ecd: %d, ball: %.2f", ecd_link_, ball_theta_);
     // 压缩弹簧过程
     if((ball_theta_ - kGapTheta) < -(15.0 / 180.0 * M_PI) && (ball_theta_ - kGapTheta) > -(45.0 / 180.0 * M_PI)) {
       spring_press_radius_ = 45.0 / 180.0 * M_PI + ball_theta_ - kGapTheta;
@@ -284,8 +348,8 @@ void MainClass::hapticRender() {
     else {
       spring_press_radius_ = 30.0 / 180.0 * M_PI;
     }
-        std_msgs::Empty empty;
-        debug_pub_.publish(empty);
+//    std_msgs::Empty empty;
+//    debug_pub_.publish(empty);
     r.sleep();
   }
 }
