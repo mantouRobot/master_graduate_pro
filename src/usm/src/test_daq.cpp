@@ -58,6 +58,7 @@ int main(int argc, char* argv[])
 // 读取编码器
   // Step 1: Create a 'UdCounterCtrl' for UpDown Counter function.
   UdCounterCtrl* udCounterCtrl = AdxUdCounterCtrlCreate();
+  UdCounterCtrl* udCounterCtrl1 = AdxUdCounterCtrlCreate();
 
   do
   {
@@ -65,19 +66,27 @@ int main(int argc, char* argv[])
     // in this example we use AccessWriteWithReset(default) mode so that we can
     // fully control the device, including configuring, sampling, etc.
     ret = udCounterCtrl->setSelectedDevice(devInfo);
+    ret = udCounterCtrl1->setSelectedDevice(devInfo);
+
     CHK_RESULT(ret);
 
     // Step 3: Set necessary parameters for counter operation,
     // Note: some of operation of this step is optional(you can do these settings via "Device Configuration" dialog).
     ret = udCounterCtrl->setChannel(channel);
+    ret = udCounterCtrl1->setChannel(1);
+
     CHK_RESULT(ret);
 
     // Step 4: Set counting type for UpDown Counter
     ret = udCounterCtrl->setCountingType(AbPhaseX4);
+    ret = udCounterCtrl1->setCountingType(AbPhaseX4);
+
     CHK_RESULT(ret);
 
     // Step 5: Start UpDown Counter
     ret= udCounterCtrl->setEnabled(true);
+    ret= udCounterCtrl1->setEnabled(true);
+
     CHK_RESULT(ret);
 
     // Step 6: Read counting value: connect the input signal to channels you selected to get UpDown counter value.
@@ -87,15 +96,20 @@ int main(int argc, char* argv[])
     {
       SLEEP(1);//get event UpDown count value per second
       printf("\n channel %u Current UpDown count: %d\n", channel,udCounterCtrl->getValue());
+      printf("channel 1 Current UpDown count: %d\n", udCounterCtrl1->getValue());
+
     }
 
     // Step 7: stop UpDown Counter
     udCounterCtrl->setEnabled(false);
+    udCounterCtrl1->setEnabled(false);
+
 
   }while(false);
 
   // Step 8: Close device and release any allocated resource.
   udCounterCtrl->Dispose();
+  udCounterCtrl1->Dispose();
 
   // If something wrong in this execution, print the error code on screen for tracking.
   if(BioFailed(ret))

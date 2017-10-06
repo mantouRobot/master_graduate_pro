@@ -62,3 +62,4 @@ usm/include/usm/main_class.h
 usm/include/usm/MyDevice.h
 usm/src/MyDevice.cpp
 usm/src/test_mouse_move.cpp
+usm/src/test_follow.cpp

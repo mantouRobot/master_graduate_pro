@@ -1,2 +1,4 @@
+src/serial/
+libs/
 build/
 devel/
