@@ -156,7 +156,8 @@ link_directories("/home/mantou/usm_ws/libs")
 link_directories(${CHAI3D_LIBRARY_DIRS})
 
 add_executable(main src/main.cpp
-                    src/main_class.cpp)
+                    src/main_class.cpp
+                    src/force_sensor.cpp)
 add_dependencies(main ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(main
   ${catkin_LIBRARIES}
@@ -177,6 +178,9 @@ target_link_libraries(test_step ${catkin_LIBRARIES} libbiodaq.so)
 
 add_executable(test_follow src/test_follow.cpp)
 target_link_libraries(test_follow ${catkin_LIBRARIES} libbiodaq.so)
+
+add_executable(test_ms src/test_ms.cpp)
+target_link_libraries(test_ms ${catkin_LIBRARIES} libbiodaq.so)
 
 #link_libraries("/home/mantou/chai3d-3.2.0/extras/GLFW/lib/release/lin-x86_64-cc/libglfw.a")
 #link_libraries("/home/mantou/chai3d-3.2.0/lib/release/lin-x86_64-cc/libchai3d.a")

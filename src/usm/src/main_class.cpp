@@ -17,12 +17,24 @@ MainClass::MainClass(ros::NodeHandle nh, ros::NodeHandle pnh) :
   nh_(nh),
   pnh_(pnh),
   ball_theta_(0),
+  ecd_link_(0),
+  ecd_motor_(0),
+  ecd_link_last_(0),
+  ecd_motor_last_(0),
+  rpm_link_(0),
+  rpm_motor_(0),
+  rpm_link_last_(0),
+  rpm_motor_last_(0),
   spring_press_radius_(30.0 / 180.0 * M_PI),
-  serial_("/dev/ttyS0", 115200, serial::Timeout::simpleTimeout(1000)),
+  motor_serial_("/dev/ttyS0", 115200, serial::Timeout::simpleTimeout(1000)),
   daq_link_(AdxUdCounterCtrlCreate()),
-  daq_motor_(AdxUdCounterCtrlCreate())
+  daq_motor_(AdxUdCounterCtrlCreate()),
+//  force_sensor_(nh, pnh),
+  force_z_(0),
+  is_ok_(false)
 {
   initHardware();
+  daq_thread_ = new boost::thread(boost::bind(&MainClass::daqThread, this));
   pangolin_thread_ = new boost::thread(boost::bind(&MainClass::startPangolin, this));
   haptic_thread_ = new boost::thread(boost::bind(&MainClass::hapticRender, this));
   debug_pub_ = nh_.advertise<std_msgs::Empty>("/debug", 1);
@@ -34,19 +46,27 @@ MainClass::~MainClass() {
     pangolin_thread_->join();
     pangolin_thread_ = nullptr;
   }
+  if(daq_thread_ != nullptr) {
+    daq_thread_->interrupt();
+    daq_thread_->join();
+    daq_thread_ = nullptr;
+  }
+
+  motor_serial_.close();
   daq_link_->Dispose();
   daq_motor_->Dispose();
 }
 
 void MainClass::initHardware()
 {
-  // 串口打开初始化
-  if(!serial_.isOpen()) {
-    serial_.open();
-    if(!serial_.isOpen())
-      ROS_ERROR("Serial open failed!");
+  // 驱动器串口打开初始化
+  if(!motor_serial_.isOpen()) {
+    motor_serial_.open();
+    if(!motor_serial_.isOpen())
+      ROS_ERROR("Motor serial open failed!");
   }
-  ROS_INFO("Serial init successed.");
+
+//  ROS_INFO("Serial init successed.");
 
   // 采集卡初始化
   DeviceInformation devInfo(L"PCI-1784,BID#0");
@@ -68,7 +88,7 @@ void MainClass::initHardware()
   CHECK(ret);
   ret= daq_motor_->setEnabled(true);
   CHECK(ret);
-  ROS_INFO("DAQ init successed.");
+//  ROS_INFO("DAQ init successed.");
 }
 
 void MainClass::keyHook(const std::string& input)
@@ -77,6 +97,8 @@ void MainClass::keyHook(const std::string& input)
     ball_theta_ += 0.05;
   else if(input == "d")
     ball_theta_ -= 0.05;
+  else if(input == "s")
+    is_ok_ = true;
 //  else if(input == "p")
 //    pitch_ += 10;
 //  else if(input == "y")
@@ -241,6 +263,7 @@ void MainClass::startPangolin() {
 
   RegisterKeyPressCallback('a', boost::bind(&MainClass::keyHook, this, "a"));
   RegisterKeyPressCallback('d', boost::bind(&MainClass::keyHook, this, "d"));
+  RegisterKeyPressCallback('s', boost::bind(&MainClass::keyHook, this, "s"));
 
   initGL();
 
@@ -295,9 +318,36 @@ void MainClass::startPangolin() {
     drawBall(ball_theta_);
     drawSpring(spring_press_radius_);
     glPopMatrix();
-
+//    ROS_WARN("rpm_link: %.2f, rpm_motor: %.2f",rpm_link_, rpm_motor_);
     // Swap frames and Process Events
     pangolin::FinishFrame();
+  }
+}
+
+void MainClass::daqThread() {
+  ros::Rate r(1000); // 1000Hz的位置采集和速度计算
+  while(ros::ok()) {
+    // 获取连杆当前角度
+    ecd_link_ = daq_link_->getValue();
+    // 获取电机当前角度
+    ecd_motor_ = -daq_motor_->getValue();
+    // 计算连杆速度，单位rpm
+    rpm_link_ = (ecd_link_ - ecd_link_last_) / 16384.0 * 1000.0 * 60.0;
+    rpm_link_ = 0.5*rpm_link_ + 0.5*rpm_link_last_;
+    // 计算电机速度，单位rpm
+    rpm_motor_ = (ecd_motor_ - ecd_motor_last_) / 16384.0 * 1000.0 * 60.0;
+    rpm_motor_ = 0.5*rpm_motor_ + 0.5*rpm_motor_last_;
+
+    ecd_link_last_ = ecd_link_;
+    ecd_motor_last_ = ecd_motor_;
+    rpm_link_last_ = rpm_link_;
+    rpm_motor_last_ = rpm_motor_;
+
+    // 采集力
+//    force_z_ = force_sensor_.getZForce();
+
+//    std::cout << ecd_link_ << "\t" << ecd_motor_ << "\t" << dpc_target_ << "\t" << force_z_ << std::endl;
+    r.sleep();
   }
 }
 
@@ -306,26 +356,57 @@ void MainClass::hapticRender() {
   ros::Rate r(100);
 
   double kGapTheta = 0.06; // 小球边缘相对于中心有角位移0.06弧度
+  double kClearance = 75; // 间隙为75*2个脉冲，合计角度为1.868*2度
+  double kStiffness = 1000; // Nmm/度
+  double kWallPosition = (15.0 - kGapTheta*180.0/M_PI)/360.0*16384.0; // 526cnt
+  double force_length = 168.5; // mm
+
+  // 1. 根据位置信息判断自由与约束
+  // 2. 自由情况跟随
+  // 3. 约束保持不动
+
+  motor_cmd_ = "A2,P43500,70#";
+//  motor_serial_.write(motor_cmd_);
+  ros::Rate r_tmp(10);
+  r_tmp.sleep();
+
+//  while(!is_ok_)
+//    ROS_ERROR_THROTTLE(1, "error!");
 
   while(ros::ok()) {
-    // 获取连杆当前角度
-    ecd_link_ = daq_link_->getValue();
-    // 获取电机当前角度
-    ecd_motor_ = daq_motor_->getValue();
-    // 根据电机当前角度计算差量
-    int32 degree = ecd_link_ + ecd_motor_;
-    if(abs(degree) < 20) degree = 0;
-//    ROS_INFO("ecd_link:%d, ecd_motor:%d, degree:%d", ecd_link_, ecd_motor_, degree);
+
+    // 根据DPC角度进行状态判定，一共有三个状态：自由，临界，约束（临界和约束对dpc一致）
+
+
+    if(ecd_link_ < (kWallPosition- kClearance)) // 自由
+      dpc_target_ = ecd_link_ + kClearance - ecd_motor_ ; // 根据电机当前角度计算差量
+    else if(ecd_link_ < kWallPosition) // 中间间隙段
+//      dpc_target_ = kWallPosition - ecd_motor_; // 直接是墙
+      dpc_target_ = 530 - ecd_motor_;
+    else // 弹簧
+      dpc_target_ = kWallPosition + force_z_*force_length/kStiffness/360.0*16384 - ecd_motor_;
+
+    ROS_INFO_THROTTLE(1, "%d,%d,%d", ecd_link_, ecd_motor_, dpc_target_);
+
+    // 位置调整死区
+    if(abs(dpc_target_) < 30) dpc_target_ = 0; //15, 20, 25
+
+
     // 下发差量
-    if(degree > 0) {
-      motor_cmd_ = "A2,P41500," + std::to_string(abs(degree)) + "#";
-//      ROS_INFO_STREAM(motor_cmd_);
-      serial_.write(motor_cmd_);
+    if(dpc_target_ > 0) {
+      if(abs(rpm_link_) > 15)
+        motor_cmd_ = "A2,P41500," + std::to_string(abs(dpc_target_)) + "#"; //42.75,43.3
+      else
+        motor_cmd_ = "A2,P41500," + std::to_string(abs(dpc_target_)) + "#";
     } else {
-      motor_cmd_ = "A2,N41500," + std::to_string(abs(degree)) + "#";
-//      ROS_INFO_STREAM(motor_cmd_);
-      serial_.write(motor_cmd_);
+      if(abs(rpm_link_) > 15)
+        motor_cmd_ = "A2,N41500," + std::to_string(abs(dpc_target_)) + "#";
+      else
+        motor_cmd_ = "A2,N41500," + std::to_string(abs(dpc_target_)) + "#";
+      //      ROS_INFO_STREAM(motor_cmd_);
     }
+
+//    motor_serial_.write(motor_cmd_);
 
     // 更新图形
     ball_theta_ = -ecd_link_ / 16384.0 * 2 * M_PI;
