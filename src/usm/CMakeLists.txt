@@ -162,7 +162,7 @@ add_dependencies(main ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARG
 target_link_libraries(main
   ${catkin_LIBRARIES}
   ${Pangolin_LIBRARIES}
-  ${GLUT_LIBRARIES}
+#  ${GLUT_LIBRARIES}
   ${OpenCV_LIBS}
   libbiodaq.so)
 
