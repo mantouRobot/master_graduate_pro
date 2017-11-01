@@ -406,7 +406,7 @@ void MainClass::hapticRender() {
       //      ROS_INFO_STREAM(motor_cmd_);
     }
 
-//    motor_serial_.write(motor_cmd_);
+    motor_serial_.write(motor_cmd_);
 
     // 更新图形
     ball_theta_ = -ecd_link_ / 16384.0 * 2 * M_PI;
