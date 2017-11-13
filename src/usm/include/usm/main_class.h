@@ -54,6 +54,7 @@ class MainClass {
 
   // 保护
   bool is_ok_;
+  enum Work_Mode{STOP, FOLLOW, VIRTURE_WALL, VIRTURE_SPRING} work_mode_;
 };
 }
 #endif // MAIN_CLASS_H

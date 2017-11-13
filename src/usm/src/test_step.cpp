@@ -75,7 +75,8 @@ public:
     // 阶跃
     case 1: {
       ROS_INFO("Step: 0~1000 cnt.");
-      motor_cmd_ = "A2,N41500,1#";
+      ecd_target_ = 15;
+      motor_cmd_ = "A2,P45500," + std::to_string(ecd_target_) + "#";
       serial_.write(motor_cmd_);
       daq_thread_ = new boost::thread(boost::bind(&Step::saveThread, this));
       break;

@@ -31,7 +31,8 @@ MainClass::MainClass(ros::NodeHandle nh, ros::NodeHandle pnh) :
   daq_motor_(AdxUdCounterCtrlCreate()),
 //  force_sensor_(nh, pnh),
   force_z_(0),
-  is_ok_(false)
+  is_ok_(false),
+  work_mode_(STOP)
 {
   initHardware();
   daq_thread_ = new boost::thread(boost::bind(&MainClass::daqThread, this));
@@ -240,8 +241,10 @@ void MainClass::initGL() {
 }
 
 void MainClass::startPangolin() {
+  // Load configuration data
+  pangolin::ParseVarsFile("/home/mantou/usm_ws/src/usm/src/app.cfg");
 
-  pangolin::CreateWindowAndBind("Main", 640, 480);
+  pangolin::CreateWindowAndBind("USM_FORCE_FEEDBACK", 640, 480);
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -275,14 +278,31 @@ void MainClass::startPangolin() {
     // Clear entire screen
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-//    static Var<bool> checkbox("ui.2D",false,true);
+    static Var<bool> button_stop("ui.Stop!", false, false);
+    static Var<bool> button_follow("ui.Follow", false, false);
+    static Var<bool> button_virture_wall("ui.Virture Wall",false,false);
+    static Var<bool> button_virture_spring("ui.Virtual Spring", false, false);
 //    static Var<bool> button("ui.Reset", false, false);
 
-//    if(checkbox)
-//    {
-//      std::cout << "set to 2d." << std::endl;
-//      is_2d_ = true;
-//    }
+    if(Pushed(button_stop)) {
+      ROS_ERROR("Set Stop!");
+      work_mode_ = STOP;
+    }
+    if(Pushed(button_follow)) {
+      ROS_WARN("Set Follow.");
+      work_mode_ = FOLLOW;
+    }
+    if(Pushed(button_virture_wall)) {
+      ROS_WARN("Set Virture Wall.");
+      work_mode_ = VIRTURE_WALL;
+    }
+    if(Pushed(button_virture_spring)) {
+      ROS_WARN("Set Virture Spring.");
+      work_mode_ = VIRTURE_SPRING;
+    }
+
+
+
 //    if(Pushed(button))
 //    {
 //      std::cout << "push the reset button." << std::endl;
@@ -322,6 +342,7 @@ void MainClass::startPangolin() {
     // Swap frames and Process Events
     pangolin::FinishFrame();
   }
+//  this->~MainClass();
 }
 
 void MainClass::daqThread() {
@@ -360,6 +381,7 @@ void MainClass::hapticRender() {
   double kStiffness = 1000; // Nmm/度
   double kWallPosition = (15.0 - kGapTheta*180.0/M_PI)/360.0*16384.0; // 526cnt
   double force_length = 168.5; // mm
+  int driver_frequency = 43900; // 用于设置超声电机驱动频率41500~44000
 
   // 1. 根据位置信息判断自由与约束
   // 2. 自由情况跟随
@@ -377,14 +399,31 @@ void MainClass::hapticRender() {
 
     // 根据DPC角度进行状态判定，一共有三个状态：自由，临界，约束（临界和约束对dpc一致）
 
-
-    if(ecd_link_ < (kWallPosition- kClearance)) // 自由
+    switch(work_mode_) {
+    case STOP:
+      dpc_target_ = 0;
+      break;
+    case FOLLOW:
       dpc_target_ = ecd_link_ + kClearance - ecd_motor_ ; // 根据电机当前角度计算差量
-    else if(ecd_link_ < kWallPosition) // 中间间隙段
-//      dpc_target_ = kWallPosition - ecd_motor_; // 直接是墙
-      dpc_target_ = 530 - ecd_motor_;
-    else // 弹簧
-      dpc_target_ = kWallPosition + force_z_*force_length/kStiffness/360.0*16384 - ecd_motor_;
+      break;
+    case VIRTURE_WALL:
+      if(ecd_link_ < (kWallPosition- kClearance)) // 自由
+        dpc_target_ = ecd_link_ + kClearance - ecd_motor_ ; // 根据电机当前角度计算差量
+      else
+        dpc_target_ = kWallPosition - ecd_motor_; // 直接是墙
+      break;
+    case VIRTURE_SPRING:
+      if(ecd_link_ < (kWallPosition- kClearance)) // 自由
+        dpc_target_ = ecd_link_ + kClearance - ecd_motor_ ; // 根据电机当前角度计算差量
+      else if(ecd_link_ < kWallPosition) // 中间间隙段
+        dpc_target_ = kWallPosition - ecd_motor_; // 直接是墙
+//        dpc_target_ = 530 - ecd_motor_;
+      else // 弹簧段
+        dpc_target_ = kWallPosition + force_z_*force_length/kStiffness/360.0*16384 - ecd_motor_;
+      break;
+    default:
+      break;
+    }
 
     ROS_INFO_THROTTLE(1, "%d,%d,%d", ecd_link_, ecd_motor_, dpc_target_);
 
@@ -395,18 +434,18 @@ void MainClass::hapticRender() {
     // 下发差量
     if(dpc_target_ > 0) {
       if(abs(rpm_link_) > 15)
-        motor_cmd_ = "A2,P41500," + std::to_string(abs(dpc_target_)) + "#"; //42.75,43.3
+        motor_cmd_ = "A2,P"+std::to_string(driver_frequency)+","+std::to_string(abs(dpc_target_)) + "#"; //42.75,43.3
       else
-        motor_cmd_ = "A2,P41500," + std::to_string(abs(dpc_target_)) + "#";
+        motor_cmd_ = "A2,P"+std::to_string(driver_frequency)+","+std::to_string(abs(dpc_target_)) + "#";
     } else {
       if(abs(rpm_link_) > 15)
-        motor_cmd_ = "A2,N41500," + std::to_string(abs(dpc_target_)) + "#";
+        motor_cmd_ = "A2,N"+std::to_string(driver_frequency)+","+std::to_string(abs(dpc_target_)) + "#";
       else
-        motor_cmd_ = "A2,N41500," + std::to_string(abs(dpc_target_)) + "#";
-      //      ROS_INFO_STREAM(motor_cmd_);
+        motor_cmd_ = "A2,N"+std::to_string(driver_frequency)+","+std::to_string(abs(dpc_target_)) + "#";
     }
+//    ROS_INFO_STREAM(motor_cmd_);
 
-    motor_serial_.write(motor_cmd_);
+      motor_serial_.write(motor_cmd_);
 
     // 更新图形
     ball_theta_ = -ecd_link_ / 16384.0 * 2 * M_PI;

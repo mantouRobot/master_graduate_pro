@@ -66,3 +66,4 @@ usm/src/test_follow.cpp
 usm/src/test_ms.cpp
 usm/include/usm/force_sensor.h
 usm/src/force_sensor.cpp
+usm/src/app.cfg
