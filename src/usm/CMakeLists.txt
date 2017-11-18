@@ -157,7 +157,8 @@ link_directories(${CHAI3D_LIBRARY_DIRS})
 
 add_executable(main src/main.cpp
                     src/main_class.cpp
-                    src/force_sensor.cpp)
+                    src/force_sensor.cpp
+                    src/ae210_force_driver.cpp)
 add_dependencies(main ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(main
   ${catkin_LIBRARIES}

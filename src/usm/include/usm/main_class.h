@@ -11,6 +11,7 @@
 #include "daq/compatibility.h"
 #include "daq/bdaqctrl.h"
 #include "force_sensor.h"
+#include "ae210_force_driver.h"
 
 using namespace Automation::BDaq;
 
@@ -50,6 +51,7 @@ class MainClass {
   std::string motor_cmd_;
   // 力传感器
 //  ForceSensor force_sensor_;
+  AE210 ae210_;
   double force_z_;
 
   // 保护

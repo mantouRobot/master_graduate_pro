@@ -30,6 +30,7 @@ MainClass::MainClass(ros::NodeHandle nh, ros::NodeHandle pnh) :
   daq_link_(AdxUdCounterCtrlCreate()),
   daq_motor_(AdxUdCounterCtrlCreate()),
 //  force_sensor_(nh, pnh),
+  ae210_(nh, pnh),
   force_z_(0),
   is_ok_(false),
   work_mode_(STOP)
@@ -381,7 +382,7 @@ void MainClass::hapticRender() {
   double kStiffness = 1000; // Nmm/度
   double kWallPosition = (15.0 - kGapTheta*180.0/M_PI)/360.0*16384.0; // 526cnt
   double force_length = 168.5; // mm
-  int driver_frequency = 43900; // 用于设置超声电机驱动频率41500~44000
+  int driver_frequency = 41500;//43900; // 用于设置超声电机驱动频率41500~44000
 
   // 1. 根据位置信息判断自由与约束
   // 2. 自由情况跟随

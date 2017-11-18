@@ -67,3 +67,5 @@ usm/src/test_ms.cpp
 usm/include/usm/force_sensor.h
 usm/src/force_sensor.cpp
 usm/src/app.cfg
+usm/include/usm/ae210_force_driver.h
+usm/src/ae210_force_driver.cpp
