@@ -25,9 +25,8 @@ class AE210 {
 
   boost::thread *force_thread_;
   void processThread();
-  bool processData(uint64_t len);
-
   double getZForce();
+
   std::mutex force_mutex_;
   double bias_;
 
@@ -35,8 +34,7 @@ class AE210 {
   ros::Publisher debug_pub_;
   std_msgs::Empty empty_;
 
-  double force_left_, force_right_;
-
+  double force_left_, force_right_, bias_left_, bias_right_, z_force_;
 };
 }
 

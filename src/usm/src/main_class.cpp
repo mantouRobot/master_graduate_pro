@@ -367,6 +367,7 @@ void MainClass::daqThread() {
 
     // 采集力
 //    force_z_ = force_sensor_.getZForce();
+    force_z_ = ae210_.getZForce();
 
 //    std::cout << ecd_link_ << "\t" << ecd_motor_ << "\t" << dpc_target_ << "\t" << force_z_ << std::endl;
     r.sleep();
