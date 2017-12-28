@@ -19,6 +19,7 @@ MainClass::MainClass(ros::NodeHandle nh, ros::NodeHandle pnh) :
   ball_theta_(0),
   ecd_link_(0),
   ecd_motor_(0),
+  ecd_dpc_(0),
   ecd_link_last_(0),
   ecd_motor_last_(0),
   rpm_link_(0),
@@ -33,7 +34,8 @@ MainClass::MainClass(ros::NodeHandle nh, ros::NodeHandle pnh) :
   ae210_(nh, pnh),
   force_z_(0),
   is_ok_(false),
-  work_mode_(STOP)
+  work_mode_(STOP),
+  kTransRatio_(5.5)
 {
   initHardware();
   daq_thread_ = new boost::thread(boost::bind(&MainClass::daqThread, this));
@@ -95,10 +97,16 @@ void MainClass::initHardware()
 
 void MainClass::keyHook(const std::string& input)
 {
-  if(input == "a")
-    ball_theta_ += 0.05;
-  else if(input == "d")
-    ball_theta_ -= 0.05;
+  if(input == "a") {
+    ROS_WARN_STREAM("To Left.");
+    std::string cmd = "A2,P43500,200#";
+    motor_serial_.write(cmd);
+  }
+  else if(input == "d") {
+    ROS_WARN_STREAM("To right.");
+    std::string cmd = "A2,N43500,200#";
+    motor_serial_.write(cmd);
+  }
   else if(input == "s")
     is_ok_ = true;
 //  else if(input == "p")
@@ -350,9 +358,10 @@ void MainClass::daqThread() {
   ros::Rate r(1000); // 1000Hz的位置采集和速度计算
   while(ros::ok()) {
     // 获取连杆当前角度
-    ecd_link_ = daq_link_->getValue();
-    // 获取电机当前角度
-    ecd_motor_ = -daq_motor_->getValue();
+    ecd_link_ = -daq_link_->getValue();
+    // 获取电机当前角度，并根据电机和传动比计算物理约束的角度
+    ecd_motor_ = daq_motor_->getValue();
+    ecd_dpc_ = ecd_motor_ / kTransRatio_;
     // 计算连杆速度，单位rpm
     rpm_link_ = (ecd_link_ - ecd_link_last_) / 16384.0 * 1000.0 * 60.0;
     rpm_link_ = 0.5*rpm_link_ + 0.5*rpm_link_last_;
@@ -394,9 +403,6 @@ void MainClass::hapticRender() {
   ros::Rate r_tmp(10);
   r_tmp.sleep();
 
-//  while(!is_ok_)
-//    ROS_ERROR_THROTTLE(1, "error!");
-
   while(ros::ok()) {
 
     // 根据DPC角度进行状态判定，一共有三个状态：自由，临界，约束（临界和约束对dpc一致）
@@ -406,46 +412,43 @@ void MainClass::hapticRender() {
       dpc_target_ = 0;
       break;
     case FOLLOW:
-      dpc_target_ = ecd_link_ + kClearance - ecd_motor_ ; // 根据电机当前角度计算差量
+      dpc_target_ = ecd_link_ + kClearance - ecd_dpc_ ; // 根据电机当前角度计算差量
       break;
     case VIRTURE_WALL:
       if(ecd_link_ < (kWallPosition- kClearance)) // 自由
-        dpc_target_ = ecd_link_ + kClearance - ecd_motor_ ; // 根据电机当前角度计算差量
+        dpc_target_ = ecd_link_ + kClearance - ecd_dpc_ ; // 根据电机当前角度计算差量
       else
-        dpc_target_ = kWallPosition - ecd_motor_; // 直接是墙
+        dpc_target_ = kWallPosition - ecd_dpc_; // 直接是墙
       break;
     case VIRTURE_SPRING:
       if(ecd_link_ < (kWallPosition- kClearance)) // 自由
-        dpc_target_ = ecd_link_ + kClearance - ecd_motor_ ; // 根据电机当前角度计算差量
+        dpc_target_ = ecd_link_ + kClearance - ecd_dpc_ ; // 根据电机当前角度计算差量
       else if(ecd_link_ < kWallPosition) // 中间间隙段
-        dpc_target_ = kWallPosition - ecd_motor_; // 直接是墙
+        dpc_target_ = kWallPosition - ecd_dpc_; // 直接是墙
 //        dpc_target_ = 530 - ecd_motor_;
       else // 弹簧段
-        dpc_target_ = kWallPosition + force_z_*force_length/kStiffness/360.0*16384 - ecd_motor_;
+        dpc_target_ = kWallPosition + force_z_*force_length/kStiffness/360.0*16384 - ecd_dpc_;
       break;
     default:
       break;
     }
 
-    ROS_INFO_THROTTLE(1, "%d,%d,%d", ecd_link_, ecd_motor_, dpc_target_);
+//    ROS_INFO_THROTTLE(1, "%d,%d,%d", ecd_link_, ecd_dpc_, dpc_target_);
+
+    motor_target_ = dpc_target_*kTransRatio_;
 
     // 位置调整死区
-    if(abs(dpc_target_) < 30) dpc_target_ = 0; //15, 20, 25
+    if(abs(motor_target_) < 30) motor_target_ = 0; //15, 20, 25
 
 
     // 下发差量
+    // 另一种思路是模糊控制，需要根据连杆速度调整驱动频率
     if(dpc_target_ > 0) {
-      if(abs(rpm_link_) > 15)
-        motor_cmd_ = "A2,P"+std::to_string(driver_frequency)+","+std::to_string(abs(dpc_target_)) + "#"; //42.75,43.3
-      else
-        motor_cmd_ = "A2,P"+std::to_string(driver_frequency)+","+std::to_string(abs(dpc_target_)) + "#";
+        motor_cmd_ = "A2,N"+std::to_string(driver_frequency)+","+std::to_string(abs(motor_target_)) + "#"; //42.75,43.3
     } else {
-      if(abs(rpm_link_) > 15)
-        motor_cmd_ = "A2,N"+std::to_string(driver_frequency)+","+std::to_string(abs(dpc_target_)) + "#";
-      else
-        motor_cmd_ = "A2,N"+std::to_string(driver_frequency)+","+std::to_string(abs(dpc_target_)) + "#";
+        motor_cmd_ = "A2,P"+std::to_string(driver_frequency)+","+std::to_string(abs(motor_target_)) + "#";
     }
-//    ROS_INFO_STREAM(motor_cmd_);
+    ROS_INFO_STREAM_THROTTLE(1, motor_cmd_);
 
       motor_serial_.write(motor_cmd_);
 
