@@ -65,7 +65,7 @@ void AE210::init()
 void AE210::processThread() {
   const double kScaleLeft = -210, kScaleRight = -260;
   int bias_cnt = 10;
-  ros::Rate r(500);
+  ros::Rate r(200); // ae210的最大通信频率为166Hz
   for(int i = 0; i < bias_cnt; i++) {
     r.sleep();
     // 读取左侧力计算bias
@@ -131,6 +131,8 @@ void AE210::processThread() {
     force_serial_.read(buffer, len);
     raw_voltage = (256*buffer[2] + buffer[1] - 2047) * 5000.0 / 2048.0;
     force_right_ = (raw_voltage - bias_right_) / kScaleRight;
+
+//    ROS_INFO_THROTTLE(0.5, "%.2f, %.2f", force_left_, force_right_);
 
     z_force_ = force_left_ - force_right_;
     debug_pub_.publish(empty_);

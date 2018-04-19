@@ -2,3 +2,4 @@ src/serial/
 libs/
 build/
 devel/
+*.creator.user

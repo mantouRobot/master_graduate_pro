@@ -71,7 +71,7 @@ public:
     //ROS_INFO("DAQ init successed.");
 
     // 发送信号，开启采集线程
-    switch(1) {
+    switch(4) {
     // 阶跃
     case 1: {
       ROS_INFO("Step: 0~1000 cnt.");
@@ -122,49 +122,49 @@ public:
       int32 error;
 
       ecd_target_ = 0;
-      motor_cmd_ = "A2,N41500,0#";
+      motor_cmd_ = "A2,N42500,0#";
       serial_.write(motor_cmd_);     
       r_50ms.sleep();
       
       ecd_target_ = 50;
       error = ecd_target_ - ecd_motor_;
-      motor_cmd_ = "A2,N41500," + std::to_string(abs(error)) + "#";
+      motor_cmd_ = "A2,N42500," + std::to_string(abs(error)) + "#";
       serial_.write(motor_cmd_);     
       r_50ms.sleep();
 
       ecd_target_ = -50;
       error = ecd_target_ - ecd_motor_;
-      motor_cmd_ = "A2,P41500," + std::to_string(abs(error)) + "#";
+      motor_cmd_ = "A2,P42500," + std::to_string(abs(error)) + "#";
       serial_.write(motor_cmd_);     
       r_50ms.sleep();
 
       ecd_target_ = 100;
       error = ecd_target_ - ecd_motor_;
-      motor_cmd_ = "A2,N41500," + std::to_string(abs(error)) + "#";
+      motor_cmd_ = "A2,N42500," + std::to_string(abs(error)) + "#";
       serial_.write(motor_cmd_);     
       r_50ms.sleep();
 
       ecd_target_ = -100;
       error = ecd_target_ - ecd_motor_;
-      motor_cmd_ = "A2,P41500," + std::to_string(abs(error)) + "#";
+      motor_cmd_ = "A2,P42500," + std::to_string(abs(error)) + "#";
       serial_.write(motor_cmd_);     
       r_50ms.sleep();
 
       ecd_target_ = 150;
       error = ecd_target_ - ecd_motor_;
-      motor_cmd_ = "A2,N41500," + std::to_string(abs(error)) + "#";
+      motor_cmd_ = "A2,N42500," + std::to_string(abs(error)) + "#";
       serial_.write(motor_cmd_);     
       r_50ms.sleep();
 
       ecd_target_ = -150;
       error = ecd_target_ - ecd_motor_;
-      motor_cmd_ = "A2,P41500," + std::to_string(abs(error)) + "#";
+      motor_cmd_ = "A2,P42500," + std::to_string(abs(error)) + "#";
       serial_.write(motor_cmd_);     
       r_50ms.sleep();
 
       ecd_target_ = 200;
       error = ecd_target_ - ecd_motor_;
-      motor_cmd_ = "A2,N41500," + std::to_string(abs(error)) + "#";
+      motor_cmd_ = "A2,N42500," + std::to_string(abs(error)) + "#";
       serial_.write(motor_cmd_);     
       r_50ms.sleep();
     }
@@ -186,7 +186,7 @@ public:
       ecd_motor_last_ = ecd_motor_;
       rpm_motor_last_ = rpm_motor_;
       std::cout << ros::Time::now() - start_time << "\t" << ecd_target_ << "\t" << ecd_motor_ << std::endl;
-      if(ros::Duration(ros::Time::now() - start_time).toSec() > 0.05)
+      if(ros::Duration(ros::Time::now() - start_time).toSec() > 0.45)
         return;
       r.sleep();
     }

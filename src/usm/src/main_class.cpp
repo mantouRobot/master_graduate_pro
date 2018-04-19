@@ -378,7 +378,9 @@ void MainClass::daqThread() {
 //    force_z_ = force_sensor_.getZForce();
     force_z_ = ae210_.getZForce();
 
-//    std::cout << ecd_link_ << "\t" << ecd_motor_ << "\t" << dpc_target_ << "\t" << force_z_ << std::endl;
+//    std::cout << ecd_link_ << "\t" << ecd_motor_ << "\t" /*<< dpc_target_ << "\t"*/ << force_z_ << std::endl;
+//    ROS_INFO_STREAM_THROTTLE(1, force_z_);
+//    std::cout << ecd_motor_ << std::endl;
     r.sleep();
   }
 }
@@ -392,7 +394,7 @@ void MainClass::hapticRender() {
   double kStiffness = 1000; // Nmm/度
   double kWallPosition = (15.0 - kGapTheta*180.0/M_PI)/360.0*16384.0; // 526cnt
   double force_length = 168.5; // mm
-  int driver_frequency = 41500;//43900; // 用于设置超声电机驱动频率41500~44000
+  int driver_frequency = 42000;//43900; // 用于设置超声电机驱动频率41500~44000
 
   // 1. 根据位置信息判断自由与约束
   // 2. 自由情况跟随
@@ -437,9 +439,15 @@ void MainClass::hapticRender() {
 
     motor_target_ = dpc_target_*kTransRatio_;
 
-    // 位置调整死区
-    if(abs(motor_target_) < 30) motor_target_ = 0; //15, 20, 25
+    // 根据速度调整驱动频率，因为驱动频率和噪声相关，希望减小噪声。因此在低速下用低频驱动
+    if(abs(rpm_link_) < 10) // 41500~43000
+      driver_frequency = 41500 + (10 - abs(rpm_link_)) * 150;
+    else
+      driver_frequency = 41500;
 
+    // 位置调整死区，位置死区是指稳定控制的目标角度，和驱动频率有关？
+    if(abs(motor_target_) < 30)
+      motor_target_ = 0; //15, 20, 25
 
     // 下发差量
     // 另一种思路是模糊控制，需要根据连杆速度调整驱动频率
@@ -448,7 +456,7 @@ void MainClass::hapticRender() {
     } else {
         motor_cmd_ = "A2,P"+std::to_string(driver_frequency)+","+std::to_string(abs(motor_target_)) + "#";
     }
-    ROS_INFO_STREAM_THROTTLE(1, motor_cmd_);
+//    ROS_INFO_STREAM_THROTTLE(1, motor_cmd_);
 
       motor_serial_.write(motor_cmd_);
 
