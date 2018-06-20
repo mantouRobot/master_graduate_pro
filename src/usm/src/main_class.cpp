@@ -4,6 +4,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <std_msgs/Empty.h>
+#include <std_msgs/String.h>
 
 #include <usm/main_class.h>
 
@@ -33,15 +34,17 @@ MainClass::MainClass(ros::NodeHandle nh, ros::NodeHandle pnh) :
 //  force_sensor_(nh, pnh),
   ae210_(nh, pnh),
   force_z_(0),
-  is_ok_(false),
+  control_mode_(MANUAL),
   work_mode_(STOP),
-  kTransRatio_(5.5)
+  kTransRatio_(5.5),
+  test_ready_(false)
 {
   initHardware();
   daq_thread_ = new boost::thread(boost::bind(&MainClass::daqThread, this));
+//  test_thread_ = new boost::thread(boost::bind(&MainClass::testThread, this));
   pangolin_thread_ = new boost::thread(boost::bind(&MainClass::startPangolin, this));
   haptic_thread_ = new boost::thread(boost::bind(&MainClass::hapticRender, this));
-  debug_pub_ = nh_.advertise<std_msgs::Empty>("/debug", 1);
+  debug_pub_ = nh_.advertise<std_msgs::String>("/debug", 1);
 }
 
 MainClass::~MainClass() {
@@ -54,6 +57,11 @@ MainClass::~MainClass() {
     daq_thread_->interrupt();
     daq_thread_->join();
     daq_thread_ = nullptr;
+  }
+  if(test_thread_ != nullptr) {
+    test_thread_->interrupt();
+    test_thread_->join();
+    test_thread_ = nullptr;
   }
 
   motor_serial_.close();
@@ -98,17 +106,25 @@ void MainClass::initHardware()
 void MainClass::keyHook(const std::string& input)
 {
   if(input == "a") {
-    ROS_WARN_STREAM("To Left.");
-    std::string cmd = "A2,P43500,200#";
+//    ROS_WARN_STREAM("To Left.");
+    std::string cmd = "A2,P43000,500#";
+//    std::string cmd = "A2,P42500,2000#";
     motor_serial_.write(cmd);
   }
   else if(input == "d") {
-    ROS_WARN_STREAM("To right.");
-    std::string cmd = "A2,N43500,200#";
+//    ROS_WARN_STREAM("To right.");
+    std::string cmd = "A2,N43000,500#";
     motor_serial_.write(cmd);
   }
-  else if(input == "s")
-    is_ok_ = true;
+  else if(input == "s") {
+    ROS_WARN_STREAM("Stop.");
+    std::string cmd = "A2,N41500,0#";
+    motor_serial_.write(cmd);
+  }
+  else if(input == "c") {
+    ROS_WARN_STREAM("Continue run.");
+    control_mode_ = AUTO;
+  }
 //  else if(input == "p")
 //    pitch_ += 10;
 //  else if(input == "y")
@@ -276,6 +292,7 @@ void MainClass::startPangolin() {
   RegisterKeyPressCallback('a', boost::bind(&MainClass::keyHook, this, "a"));
   RegisterKeyPressCallback('d', boost::bind(&MainClass::keyHook, this, "d"));
   RegisterKeyPressCallback('s', boost::bind(&MainClass::keyHook, this, "s"));
+  RegisterKeyPressCallback('c', boost::bind(&MainClass::keyHook, this, "c"));
 
   initGL();
 
@@ -350,12 +367,19 @@ void MainClass::startPangolin() {
 //    ROS_WARN("rpm_link: %.2f, rpm_motor: %.2f",rpm_link_, rpm_motor_);
     // Swap frames and Process Events
     pangolin::FinishFrame();
+
+    std_msgs::String str;
+    str.data = std::to_string(force_z_);
+    debug_pub_.publish(str);
   }
 //  this->~MainClass();
 }
 
 void MainClass::daqThread() {
   ros::Rate r(1000); // 1000Hz的位置采集和速度计算
+//  std::unique_lock<std::mutex> lock(mutex_);
+//  cv_.wait(lock, [&] {return test_ready_;});
+  ros::Time start_time = ros::Time::now();
   while(ros::ok()) {
     // 获取连杆当前角度
     ecd_link_ = -daq_link_->getValue();
@@ -378,11 +402,63 @@ void MainClass::daqThread() {
 //    force_z_ = force_sensor_.getZForce();
     force_z_ = ae210_.getZForce();
 
-//    std::cout << ecd_link_ << "\t" << ecd_motor_ << "\t" /*<< dpc_target_ << "\t"*/ << force_z_ << std::endl;
+//    if(work_mode_ == VIRTURE_WALL)
+//      std::cout << ros::Time::now() - start_time << "\t" << ecd_link_ << "\t" << force_z_ << "\t" << force_z_ << std::endl;
+//      std::cout << ecd_link_ << "\t" << ecd_motor_ << "\t" << dpc_target_ << "\t" << ecd_dpc_ << std::endl;
 //    ROS_INFO_STREAM_THROTTLE(1, force_z_);
-//    std::cout << ecd_motor_ << std::endl;
+//    std::cout << force_z_ << std::endl;
+//    ROS_INFO_STREAM_THROTTLE(1, force_z_);
     r.sleep();
   }
+}
+
+void MainClass::testThread() {
+  ros::Rate r_50ms(20);
+  std::unique_lock<std::mutex> lock(mutex_);
+
+  switch(1) {
+  case 1: // 台阶模式
+    // 第一个50ms，启动自动模式
+    control_mode_ = AUTO;
+    work_mode_ = TEST;
+    dpc_target_ = 0;
+
+    test_ready_ = true;
+//    lock.unlock();
+//    cv_.notify_all();
+
+    r_50ms.sleep();
+    // 第二个50ms
+    dpc_target_ = 50/kTransRatio_;
+    r_50ms.sleep();
+    // 3
+    dpc_target_ = -50/kTransRatio_;
+    r_50ms.sleep();
+    // 4
+    dpc_target_ = 100/kTransRatio_;
+    r_50ms.sleep();
+    // 5
+    dpc_target_ = -100/kTransRatio_;
+    r_50ms.sleep();
+    // 6
+    dpc_target_ = 150/kTransRatio_;
+    r_50ms.sleep();
+    // 7
+    dpc_target_ = -150/kTransRatio_;
+    r_50ms.sleep();
+    // 8
+    dpc_target_ = 200/kTransRatio_;
+    r_50ms.sleep();
+    break;
+  case 2: // 求速度转换用时
+    control_mode_ = AUTO;
+    work_mode_ = TEST;
+    dpc_target_ = 0;
+    break;
+  default:
+    break;
+  }
+  work_mode_ = STOP;
 }
 
 void MainClass::hapticRender() {
@@ -391,7 +467,7 @@ void MainClass::hapticRender() {
 
   double kGapTheta = 0.06; // 小球边缘相对于中心有角位移0.06弧度
   double kClearance = 75; // 间隙为75*2个脉冲，合计角度为1.868*2度
-  double kStiffness = 1000; // Nmm/度
+  double kStiffness = 400;//250; // 最小为200Nmm/度，再小就不稳定了
   double kWallPosition = (15.0 - kGapTheta*180.0/M_PI)/360.0*16384.0; // 526cnt
   double force_length = 168.5; // mm
   int driver_frequency = 42000;//43900; // 用于设置超声电机驱动频率41500~44000
@@ -400,36 +476,43 @@ void MainClass::hapticRender() {
   // 2. 自由情况跟随
   // 3. 约束保持不动
 
-  motor_cmd_ = "A2,P43500,70#";
-//  motor_serial_.write(motor_cmd_);
-  ros::Rate r_tmp(10);
-  r_tmp.sleep();
+//  std::unique_lock<std::mutex> lock(mutex_);
+//  cv_.wait(lock, [&] {return test_ready_;});
 
+//  while(!test_ready_);
   while(ros::ok()) {
 
-    // 根据DPC角度进行状态判定，一共有三个状态：自由，临界，约束（临界和约束对dpc一致）
+    if(control_mode_ == MANUAL)
+      continue;
 
+    // 根据DPC角度进行状态判定，一共有三个状态：自由，临界，约束（临界和约束对dpc一致）
     switch(work_mode_) {
     case STOP:
-      dpc_target_ = 0;
+      motor_serial_.write("A2,P41500,0#");
+      continue;
+    case TEST:
       break;
     case FOLLOW:
-      dpc_target_ = ecd_link_ + kClearance - ecd_dpc_ ; // 根据电机当前角度计算差量
+      dpc_target_ = ecd_link_ + kClearance;// - ecd_dpc_ ; // 根据电机当前角度计算差量
       break;
     case VIRTURE_WALL:
-      if(ecd_link_ < (kWallPosition- kClearance)) // 自由
-        dpc_target_ = ecd_link_ + kClearance - ecd_dpc_ ; // 根据电机当前角度计算差量
+      if(ecd_link_ < (-1891+75)) // 左墙面
+        dpc_target_ = -1891+75*2;
+      else if(ecd_link_ < (kWallPosition- kClearance)) // 自由
+        dpc_target_ = ecd_link_ + kClearance;// - ecd_dpc_ ; // 根据电机当前角度计算差量
       else
-        dpc_target_ = kWallPosition - ecd_dpc_; // 直接是墙
+        dpc_target_ = kWallPosition;// - ecd_dpc_; // 直接是墙
       break;
     case VIRTURE_SPRING:
-      if(ecd_link_ < (kWallPosition- kClearance)) // 自由
-        dpc_target_ = ecd_link_ + kClearance - ecd_dpc_ ; // 根据电机当前角度计算差量
+      if(ecd_link_ < (-1891+75)) // 左墙面
+        dpc_target_ = -1891+75*2;
+      else if(ecd_link_ < (kWallPosition- kClearance)) // 自由
+        dpc_target_ = ecd_link_ + kClearance;// - ecd_dpc_ ; // 根据电机当前角度计算差量
       else if(ecd_link_ < kWallPosition) // 中间间隙段
-        dpc_target_ = kWallPosition - ecd_dpc_; // 直接是墙
+        dpc_target_ = kWallPosition+7;// - ecd_dpc_; // 直接是墙，此时可能出现dpc与连杆角度不一致的问题，因此dpc此时稍有嵌入
 //        dpc_target_ = 530 - ecd_motor_;
       else // 弹簧段
-        dpc_target_ = kWallPosition + force_z_*force_length/kStiffness/360.0*16384 - ecd_dpc_;
+        dpc_target_ = kWallPosition + force_z_*force_length/kStiffness/360.0*16384;// - ecd_dpc_;
       break;
     default:
       break;
@@ -437,28 +520,32 @@ void MainClass::hapticRender() {
 
 //    ROS_INFO_THROTTLE(1, "%d,%d,%d", ecd_link_, ecd_dpc_, dpc_target_);
 
-    motor_target_ = dpc_target_*kTransRatio_;
+    // 根据dpc目标角度，计算控制偏差，用该偏差调整速度
+    double pid_P = 1.1112;
+    double spd_cmd = pid_P * (dpc_target_ - ecd_dpc_);
+    if(fabs(spd_cmd) > 10) {
+      driver_frequency = (fabs(spd_cmd) - 2046.8) / (-47) * 1000.0;//(spd_cmd - 2294) / (-52.8) * 1000.0; // (spd_cmd - 2391.2) / (-55.2) * 1000.0;
+      motor_target_ = 2000;
+    } else {
+      motor_target_ = 0;
+    }
 
-    // 根据速度调整驱动频率，因为驱动频率和噪声相关，希望减小噪声。因此在低速下用低频驱动
-    if(abs(rpm_link_) < 10) // 41500~43000
-      driver_frequency = 41500 + (10 - abs(rpm_link_)) * 150;
-    else
+    if(driver_frequency > 43500)
+      driver_frequency = 43500;
+    else if(driver_frequency < 41500)
       driver_frequency = 41500;
 
-    // 位置调整死区，位置死区是指稳定控制的目标角度，和驱动频率有关？
-    if(abs(motor_target_) < 30)
-      motor_target_ = 0; //15, 20, 25
+//    ROS_INFO("dpc_target = %d, spd_cmd = %.2f, drive_frequency = %d", dpc_target_, spd_cmd, driver_frequency);
 
     // 下发差量
     // 另一种思路是模糊控制，需要根据连杆速度调整驱动频率
-    if(dpc_target_ > 0) {
+    if(spd_cmd > 0) {
         motor_cmd_ = "A2,N"+std::to_string(driver_frequency)+","+std::to_string(abs(motor_target_)) + "#"; //42.75,43.3
     } else {
         motor_cmd_ = "A2,P"+std::to_string(driver_frequency)+","+std::to_string(abs(motor_target_)) + "#";
     }
-//    ROS_INFO_STREAM_THROTTLE(1, motor_cmd_);
 
-      motor_serial_.write(motor_cmd_);
+    motor_serial_.write(motor_cmd_);
 
     // 更新图形
     ball_theta_ = -ecd_link_ / 16384.0 * 2 * M_PI;

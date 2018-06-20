@@ -3,3 +3,4 @@ libs/
 build/
 devel/
 *.creator.user
+usm.creator.user

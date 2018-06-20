@@ -167,8 +167,38 @@ public:
       motor_cmd_ = "A2,N42500," + std::to_string(abs(error)) + "#";
       serial_.write(motor_cmd_);     
       r_50ms.sleep();
+      break;
     }
+      case 5: { // 求取速度转换用时
+      ros::Rate r_50ms(20);
+      int32 error;
 
+      ecd_target_ = 5000;
+      error = ecd_target_ - ecd_motor_;
+      motor_cmd_ = "A2,N43500," + std::to_string(abs(error)) + "#";
+      serial_.write(motor_cmd_);
+      daq_thread_ = new boost::thread(boost::bind(&Step::saveThread, this));
+      r_50ms.sleep();
+
+      ecd_target_ = 5000;
+      error = ecd_target_ - ecd_motor_;
+      motor_cmd_ = "A2,N41500," + std::to_string(abs(error)) + "#";
+      serial_.write(motor_cmd_);
+      r_50ms.sleep();
+
+      ecd_target_ = -5000;
+      error = ecd_target_ - ecd_motor_;
+      motor_cmd_ = "A2,P41500," + std::to_string(abs(error)) + "#";
+      serial_.write(motor_cmd_);
+      r_50ms.sleep();
+
+      ecd_target_ = 5000;
+      error = ecd_target_ - ecd_motor_;
+      motor_cmd_ = "A2,P43500," + std::to_string(abs(error)) + "#";
+      serial_.write(motor_cmd_);
+      r_50ms.sleep();
+      break;
+    }
 
     default:
       break;
@@ -186,7 +216,7 @@ public:
       ecd_motor_last_ = ecd_motor_;
       rpm_motor_last_ = rpm_motor_;
       std::cout << ros::Time::now() - start_time << "\t" << ecd_target_ << "\t" << ecd_motor_ << std::endl;
-      if(ros::Duration(ros::Time::now() - start_time).toSec() > 0.45)
+      if(ros::Duration(ros::Time::now() - start_time).toSec() > 0.25)
         return;
       r.sleep();
     }

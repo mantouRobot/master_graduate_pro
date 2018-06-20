@@ -1,7 +1,9 @@
 #ifndef MAIN_CLASS_H
 #define MAIN_CLASS_H
 
+#include <mutex>
 #include <iostream>
+#include <condition_variable>
 
 #include <boost/thread.hpp>
 #include <ros/ros.h>
@@ -33,10 +35,11 @@ class MainClass {
 
   void initHardware();
   void daqThread();
+  void testThread();
 
   ros::NodeHandle nh_, pnh_;
   ros::Publisher debug_pub_;
-  boost::thread *pangolin_thread_, *haptic_thread_, *daq_thread_;
+  boost::thread *pangolin_thread_, *haptic_thread_, *daq_thread_, *test_thread_;
   double ball_theta_;
   double spring_press_radius_;
   GLuint texture_;
@@ -57,8 +60,13 @@ class MainClass {
   // 传动比
   double kTransRatio_;
   // 保护
-  bool is_ok_;
-  enum Work_Mode{STOP, FOLLOW, VIRTURE_WALL, VIRTURE_SPRING} work_mode_;
+  enum Control_Mode{MANUAL, AUTO} control_mode_;
+  enum Work_Mode{STOP, TEST, FOLLOW, VIRTURE_WALL, VIRTURE_SPRING} work_mode_;
+
+  // 线程同步条件，互斥锁，条件变量
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool test_ready_;
 };
 }
 #endif // MAIN_CLASS_H
